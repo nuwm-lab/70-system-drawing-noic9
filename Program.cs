@@ -1,481 +1,214 @@
 using System;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using System.Collections.Generic;
 
 namespace GraphDrawing
 {
-    /// <summary>
-    /// Клас для рендерингу графіка функції
-    /// </summary>
-    public class ChartRenderer
+    public class GraphForm : Form
     {
-        private const double XMin = 0.0;
-        private const double XMax = 0.5;
-        private const double DeltaX = 0.1;
+        private const double X_START = 0.0;
+        private const double X_END = 0.5;
+        private const double DELTA_X = 0.1;
+        
+        private List<PointF> dataPoints;
+        private double minY, maxY;
 
-        private readonly double _yMin;
-        private readonly double _yMax;
-
-        // Кешовані ресурси для малювання
-        private readonly Pen _axisPen;
-        private readonly Pen _gridPen;
-        private readonly Pen _graphPen;
-        private readonly Brush _pointBrush;
-        private readonly Brush _textBrush;
-        private readonly Brush _arrowBrush;
-        private readonly Font _labelFont;
-        private readonly Font _axisFont;
-        private readonly Font _titleFont;
-
-        // Кешовані точки графіка
-        private Point[] _cachedScreenPoints;
-        private Point[] _cachedDeltaPoints;
-        private Rectangle _lastDrawArea;
-
-        public enum DrawMode { LineAndPoints, LineOnly, PointsOnly }
-
-        public ChartRenderer()
+        public GraphForm()
         {
-            // Обчислення діапазону Y
-            CalculateFunctionRange(out _yMin, out _yMax);
-
-            // Ініціалізація ресурсів
-            _axisPen = new Pen(Color.Black, 2);
-            _gridPen = new Pen(Color.LightGray, 1) { DashStyle = DashStyle. Dot };
-            _graphPen = new Pen(Color.Blue, 3);
-            _pointBrush = new SolidBrush(Color.Red);
-            _textBrush = new SolidBrush(Color.Black);
-            _arrowBrush = new SolidBrush(Color. Black);
-            _labelFont = new Font("Arial", 10);
-            _axisFont = new Font("Arial", 12, FontStyle.Bold);
-            _titleFont = new Font("Arial", 11, FontStyle. Italic);
-
-            _lastDrawArea = Rectangle.Empty;
+            InitializeForm();
+            CalculateDataPoints();
         }
 
-        /// <summary>
-        /// Обчислення діапазону значень функції
-        /// </summary>
-        private void CalculateFunctionRange(out double yMin, out double yMax)
+        private void InitializeForm()
         {
-            yMin = double.MaxValue;
-            yMax = double.MinValue;
+            this.Text = "Графік функції y = (2.5x³) / (e^(2x) + 2)";
+            this.Size = new Size(800, 600);
+            this.MinimumSize = new Size(400, 300);
+            this.BackColor = Color.White;
+            
+            // Встановлюємо подвійну буферизацію для плавного малювання
+            this.DoubleBuffered = true;
+            
+            // Підписуємось на події
+            this.Paint += GraphForm_Paint;
+            this.Resize += GraphForm_Resize;
+        }
 
-            for (double x = XMin; x <= XMax + DeltaX / 2; x += DeltaX)
-            {
-                double y = CalculateY(x);
-                if (y < yMin) yMin = y;
-                if (y > yMax) yMax = y;
-            }
+        private void CalculateDataPoints()
+        {
+            dataPoints = new List<PointF>();
+            minY = double.MaxValue;
+            maxY = double.MinValue;
 
-            // Додаємо запас для осей
-            double yRange = yMax - yMin;
-            if (Math.Abs(yRange) < 1e-10)
+            // Обчислюємо точки графіка
+            for (double x = X_START; x <= X_END; x += DELTA_X)
             {
-                yRange = 1. 0;
-                yMin -= 0.5;
-                yMax += 0.5;
-            }
-            else
-            {
-                yMin -= yRange * 0.1;
-                yMax += yRange * 0.1;
+                double y = CalculateFunction(x);
+                dataPoints.Add(new PointF((float)x, (float)y));
+                
+                // Знаходимо мінімум та максимум для масштабування
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
             }
         }
 
-        /// <summary>
-        /// Обчислення значення функції y = (2. 5x³) / (e^(2x) + 2)
-        /// </summary>
-        private double CalculateY(double x)
+        private double CalculateFunction(double x)
         {
+            // y = (2.5x³) / (e^(2x) + 2)
             double numerator = 2.5 * Math.Pow(x, 3);
             double denominator = Math.Exp(2 * x) + 2;
             return numerator / denominator;
         }
 
-        /// <summary>
-        /// Перетворення координат графіка в координати екрану
-        /// </summary>
-        private Point ConvertToScreenCoordinates(double x, double y, Rectangle drawArea)
+        private void GraphForm_Paint(object sender, PaintEventArgs e)
         {
-            if (drawArea. Width <= 0 || drawArea.Height <= 0)
-                return new Point(drawArea.Left, drawArea.Bottom);
+            Graphics g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
 
-            double xRange = XMax - XMin;
-            double yRange = _yMax - _yMin;
+            // Визначаємо відступи
+            int leftMargin = 60;
+            int rightMargin = 40;
+            int topMargin = 40;
+            int bottomMargin = 60;
 
-            if (Math.Abs(xRange) < 1e-10) xRange = 1.0;
-            if (Math.Abs(yRange) < 1e-10) yRange = 1. 0;
+            int graphWidth = this.ClientSize.Width - leftMargin - rightMargin;
+            int graphHeight = this.ClientSize.Height - topMargin - bottomMargin;
 
-            int screenX = (int)(drawArea.Left + (x - XMin) / xRange * drawArea.Width);
-            int screenY = (int)(drawArea.Bottom - (y - _yMin) / yRange * drawArea.Height);
+            // Малюємо координатні осі
+            DrawAxes(g, leftMargin, topMargin, graphWidth, graphHeight);
 
-            return new Point(screenX, screenY);
+            // Малюємо сітку
+            DrawGrid(g, leftMargin, topMargin, graphWidth, graphHeight);
+
+            // Малюємо підписи осей
+            DrawLabels(g, leftMargin, topMargin, graphWidth, graphHeight);
+
+            // Малюємо графік
+            DrawGraph(g, leftMargin, topMargin, graphWidth, graphHeight);
+
+            // Виводимо формулу
+            DrawFormula(g);
         }
 
-        /// <summary>
-        /// Отримання координати Y для осі X (де y = 0)
-        /// </summary>
-        private int GetXAxisScreenY(Rectangle drawArea)
+        private void DrawAxes(Graphics g, int left, int top, int width, int height)
         {
-            if (_yMin <= 0 && _yMax >= 0)
-            {
-                Point p = ConvertToScreenCoordinates(XMin, 0, drawArea);
-                return p.Y;
-            }
-            return drawArea.Bottom;
+            Pen axisPen = new Pen(Color.Black, 2);
+
+            // Вертикальна вісь (Y)
+            g.DrawLine(axisPen, left, top, left, top + height);
+
+            // Горизонтальна вісь (X)
+            g.DrawLine(axisPen, left, top + height, left + width, top + height);
+
+            // Стрілки
+            g.DrawLine(axisPen, left - 5, top + 10, left, top);
+            g.DrawLine(axisPen, left + 5, top + 10, left, top);
+            g.DrawLine(axisPen, left + width - 10, top + height - 5, left + width, top + height);
+            g.DrawLine(axisPen, left + width - 10, top + height + 5, left + width, top + height);
         }
 
-        /// <summary>
-        /// Отримання координати X для осі Y (де x = 0)
-        /// </summary>
-        private int GetYAxisScreenX(Rectangle drawArea)
+        private void DrawGrid(Graphics g, int left, int top, int width, int height)
         {
-            if (XMin <= 0 && XMax >= 0)
-            {
-                Point p = ConvertToScreenCoordinates(0, _yMin, drawArea);
-                return p.X;
-            }
-            return drawArea.Left;
-        }
+            Pen gridPen = new Pen(Color.LightGray, 1);
+            gridPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dot;
 
-        /// <summary>
-        /// Перерахунок кешованих точок графіка
-        /// </summary>
-        private void RecalculateScreenPoints(Rectangle drawArea)
-        {
-            if (drawArea.Width <= 0 || drawArea.Height <= 0)
-                return;
-
-            // Динамічний розрахунок кількості точок
-            int pixelsPerPoint = 3;
-            int targetPointCount = Math.Max(drawArea.Width / pixelsPerPoint, 20);
-
-            double step = (XMax - XMin) / (targetPointCount - 1);
-            step = Math.Max(step, DeltaX / 10);
-
-            int pointCount = (int)((XMax - XMin) / step) + 1;
-            _cachedScreenPoints = new Point[pointCount];
-
-            for (int i = 0; i < pointCount; i++)
-            {
-                double x = XMin + i * step;
-                if (x > XMax) x = XMax;
-
-                double y = CalculateY(x);
-                _cachedScreenPoints[i] = ConvertToScreenCoordinates(x, y, drawArea);
-            }
-
-            // Точки за кроком DeltaX
-            int deltaPointCount = (int)((XMax - XMin) / DeltaX) + 1;
-            _cachedDeltaPoints = new Point[deltaPointCount];
-
-            for (int i = 0; i < deltaPointCount; i++)
-            {
-                double x = XMin + i * DeltaX;
-                double y = CalculateY(x);
-                _cachedDeltaPoints[i] = ConvertToScreenCoordinates(x, y, drawArea);
-            }
-
-            _lastDrawArea = drawArea;
-        }
-
-        /// <summary>
-        /// Головний метод рендерингу
-        /// </summary>
-        public void Render(Graphics g, Rectangle clientArea, DrawMode mode)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Color.White);
-
-            // Визначення області для малювання
-            int margin = 70;
-            int topMargin = 50;
-            Rectangle drawArea = new Rectangle(
-                margin,
-                topMargin,
-                clientArea.Width - 2 * margin,
-                clientArea.Height - margin - topMargin
-            );
-
-            // Перевірка коректності розмірів
-            if (drawArea.Width <= 0 || drawArea.Height <= 0)
-                return;
-
-            // Перерахунок точок при зміні розміру
-            if (_lastDrawArea != drawArea)
-            {
-                RecalculateScreenPoints(drawArea);
-            }
-
-            DrawGrid(g, drawArea);
-            DrawAxes(g, drawArea);
-            DrawGraph(g, drawArea, mode);
-            DrawLabels(g, drawArea);
-            DrawTitle(g, clientArea);
-        }
-
-        /// <summary>
-        /// Малювання сітки
-        /// </summary>
-        private void DrawGrid(Graphics g, Rectangle drawArea)
-        {
             // Вертикальні лінії
-            for (double x = XMin; x <= XMax + DeltaX / 2; x += DeltaX)
+            for (int i = 1; i < 10; i++)
             {
-                Point p = ConvertToScreenCoordinates(x, _yMin, drawArea);
-                g.DrawLine(_gridPen, p. X, drawArea.Top, p.X, drawArea. Bottom);
+                int x = left + (width * i) / 10;
+                g.DrawLine(gridPen, x, top, x, top + height);
             }
 
             // Горизонтальні лінії
-            int gridLinesCount = 10;
-            for (int i = 0; i <= gridLinesCount; i++)
+            for (int i = 1; i < 10; i++)
             {
-                double y = _yMin + (_yMax - _yMin) * i / gridLinesCount;
-                Point p = ConvertToScreenCoordinates(XMin, y, drawArea);
-                g. DrawLine(_gridPen, drawArea.Left, p.Y, drawArea.Right, p.Y);
+                int y = top + (height * i) / 10;
+                g.DrawLine(gridPen, left, y, left + width, y);
             }
         }
 
-        /// <summary>
-        /// Малювання осей координат
-        /// </summary>
-        private void DrawAxes(Graphics g, Rectangle drawArea)
+        private void DrawLabels(Graphics g, int left, int top, int width, int height)
         {
-            int xAxisY = GetXAxisScreenY(drawArea);
-            int yAxisX = GetYAxisScreenX(drawArea);
+            Font labelFont = new Font("Arial", 8);
+            Brush labelBrush = Brushes.Black;
 
-            // Осі
-            g.DrawLine(_axisPen, drawArea.Left, xAxisY, drawArea.Right, xAxisY);
-            g.DrawLine(_axisPen, yAxisX, drawArea.Top, yAxisX, drawArea.Bottom);
-
-            // Стрілки
-            DrawArrow(g, drawArea. Right, xAxisY, 0);
-            DrawArrow(g, yAxisX, drawArea.Top, 90);
-        }
-
-        /// <summary>
-        /// Малювання стрілки
-        /// </summary>
-        private void DrawArrow(Graphics g, int x, int y, int angle)
-        {
-            int arrowSize = 10;
-            PointF[] arrowPoints;
-
-            if (angle == 0)
-            {
-                arrowPoints = new PointF[]
-                {
-                    new PointF(x, y),
-                    new PointF(x - arrowSize, y - arrowSize / 2f),
-                    new PointF(x - arrowSize, y + arrowSize / 2f)
-                };
-            }
-            else
-            {
-                arrowPoints = new PointF[]
-                {
-                    new PointF(x, y),
-                    new PointF(x - arrowSize / 2f, y + arrowSize),
-                    new PointF(x + arrowSize / 2f, y + arrowSize)
-                };
-            }
-
-            g. FillPolygon(_arrowBrush, arrowPoints);
-        }
-
-        /// <summary>
-        /// Малювання графіка
-        /// </summary>
-        private void DrawGraph(Graphics g, Rectangle drawArea, DrawMode mode)
-        {
-            if (_cachedScreenPoints == null || _cachedScreenPoints.Length == 0)
-                return;
-
-            // Малювання ліній
-            if ((mode == DrawMode.LineAndPoints || mode == DrawMode.LineOnly) && _cachedScreenPoints. Length > 1)
-            {
-                g.DrawLines(_graphPen, _cachedScreenPoints);
-            }
-
-            // Малювання точок
-            if ((mode == DrawMode.LineAndPoints || mode == DrawMode.PointsOnly) && _cachedDeltaPoints != null)
-            {
-                foreach (Point p in _cachedDeltaPoints)
-                {
-                    g.FillEllipse(_pointBrush, p.X - 4, p.Y - 4, 8, 8);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Малювання підписів осей
-        /// </summary>
-        private void DrawLabels(Graphics g, Rectangle drawArea)
-        {
             // Підписи осі X
-            for (double x = XMin; x <= XMax + DeltaX / 2; x += DeltaX)
+            for (int i = 0; i <= 5; i++)
             {
-                Point p = ConvertToScreenCoordinates(x, _yMin, drawArea);
-                string label = x.ToString("F1");
-                SizeF labelSize = g.MeasureString(label, _labelFont);
-                g.DrawString(label, _labelFont, _textBrush,
-                    p.X - labelSize.Width / 2,
-                    drawArea.Bottom + 5);
+                double xValue = X_START + (X_END - X_START) * i / 5.0;
+                int xPos = left + (width * i) / 5;
+                string label = xValue.ToString("F2");
+                SizeF size = g.MeasureString(label, labelFont);
+                g.DrawString(label, labelFont, labelBrush, 
+                    xPos - size.Width / 2, top + height + 5);
             }
 
             // Підписи осі Y
-            int gridLinesCount = 10;
-            for (int i = 0; i <= gridLinesCount; i++)
+            for (int i = 0; i <= 5; i++)
             {
-                double y = _yMin + (_yMax - _yMin) * i / gridLinesCount;
-                Point p = ConvertToScreenCoordinates(XMin, y, drawArea);
-                string label = y.ToString("F4");
-                SizeF labelSize = g.MeasureString(label, _labelFont);
-                g.DrawString(label, _labelFont, _textBrush,
-                    drawArea.Left - labelSize.Width - 5,
-                    p. Y - labelSize.Height / 2);
+                double yValue = maxY - (maxY - minY) * i / 5.0;
+                int yPos = top + (height * i) / 5;
+                string label = yValue.ToString("F4");
+                SizeF size = g.MeasureString(label, labelFont);
+                g.DrawString(label, labelFont, labelBrush, 
+                    left - size.Width - 5, yPos - size.Height / 2);
             }
 
             // Назви осей
-            g.DrawString("X", _axisFont, _textBrush, drawArea.Right + 5, drawArea.Bottom - 10);
-            g.DrawString("Y", _axisFont, _textBrush, drawArea. Left - 10, drawArea.Top - 20);
+            Font axisFont = new Font("Arial", 10, FontStyle.Bold);
+            g.DrawString("X", axisFont, labelBrush, left + width + 5, top + height - 10);
+            g.DrawString("Y", axisFont, labelBrush, left - 15, top - 20);
         }
 
-        /// <summary>
-        /// Малювання заголовка
-        /// </summary>
-        private void DrawTitle(Graphics g, Rectangle clientArea)
+        private void DrawGraph(Graphics g, int left, int top, int width, int height)
         {
-            string formula = "y = (2.5x³) / (e^(2x) + 2)";
-            SizeF formulaSize = g.MeasureString(formula, _titleFont);
-            g.DrawString(formula, _titleFont, _textBrush,
-                (clientArea.Width - formulaSize.Width) / 2, 10);
-        }
+            if (dataPoints.Count < 2) return;
 
-        /// <summary>
-        /// Звільнення ресурсів
-        /// </summary>
-        public void Dispose()
-        {
-            _axisPen?.Dispose();
-            _gridPen?. Dispose();
-            _graphPen?.Dispose();
-            _pointBrush?.Dispose();
-            _textBrush?. Dispose();
-            _arrowBrush?.Dispose();
-            _labelFont?.Dispose();
-            _axisFont?. Dispose();
-            _titleFont?. Dispose();
-        }
-    }
+            Pen graphPen = new Pen(Color.Blue, 2);
+            Brush pointBrush = new SolidBrush(Color.Red);
 
-    /// <summary>
-    /// Форма для відображення графіка
-    /// </summary>
-    public class GraphForm : Form
-    {
-        private readonly ChartRenderer _renderer;
-        private ComboBox _drawModeComboBox;
-        private Label _modeLabel;
-        private ChartRenderer.DrawMode _currentDrawMode = ChartRenderer.DrawMode.LineAndPoints;
-
-        public GraphForm()
-        {
-            this.Text = "Графік функції y = (2.5x³) / (e^(2x) + 2)";
-            this.Size = new Size(900, 700);
-            this.MinimumSize = new Size(500, 400);
-
-            // Увімкнення подвійного буферування
-            SetStyle(ControlStyles.OptimizedDoubleBuffer |
-                     ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.UserPaint, true);
-
-            _renderer = new ChartRenderer();
-            InitializeControls();
-        }
-
-        /// <summary>
-        /// Ініціалізація UI елементів
-        /// </summary>
-        private void InitializeControls()
-        {
-            _modeLabel = new Label
+            // Перетворюємо точки даних у координати екрану
+            PointF[] screenPoints = new PointF[dataPoints.Count];
+            
+            for (int i = 0; i < dataPoints.Count; i++)
             {
-                Text = "Режим:",
-                Location = new Point(10, 10),
-                Size = new Size(60, 25),
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-            this.Controls.Add(_modeLabel);
-
-            _drawModeComboBox = new ComboBox
-            {
-                Location = new Point(70, 10),
-                Size = new Size(200, 25),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            _drawModeComboBox.Items.AddRange(new string[]
-            {
-                "Лінії та точки",
-                "Тільки лінії",
-                "Тільки точки"
-            });
-            _drawModeComboBox.SelectedIndex = 0;
-            _drawModeComboBox. SelectedIndexChanged += DrawModeComboBox_SelectedIndexChanged;
-            this.Controls.Add(_drawModeComboBox);
-        }
-
-        /// <summary>
-        /// Обробник зміни режиму малювання
-        /// </summary>
-        private void DrawModeComboBox_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            _currentDrawMode = (ChartRenderer.DrawMode)_drawModeComboBox. SelectedIndex;
-            this.Invalidate();
-        }
-
-        /// <summary>
-        /// Перевизначення OnResize
-        /// </summary>
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            this.Invalidate();
-        }
-
-        /// <summary>
-        /// Перевизначення OnPaint
-        /// </summary>
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            _renderer.Render(e.Graphics, this.ClientRectangle, _currentDrawMode);
-        }
-
-        /// <summary>
-        /// Звільнення ресурсів
-        /// </summary>
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                _renderer?.Dispose();
-                _drawModeComboBox?.Dispose();
-                _modeLabel?.Dispose();
+                float screenX = left + (dataPoints[i].X - (float)X_START) / 
+                    ((float)X_END - (float)X_START) * width;
+                float screenY = top + height - (dataPoints[i].Y - (float)minY) / 
+                    ((float)maxY - (float)minY) * height;
+                
+                screenPoints[i] = new PointF(screenX, screenY);
             }
-            base. Dispose(disposing);
-        }
-    }
 
-    static class Program
-    {
-        /// <summary>
-        /// Головна точка входу для програми. 
-        /// </summary>
+            // Малюємо лінії графіка
+            g.DrawLines(graphPen, screenPoints);
+
+            // Малюємо точки
+            foreach (PointF point in screenPoints)
+            {
+                g.FillEllipse(pointBrush, point.X - 3, point.Y - 3, 6, 6);
+            }
+        }
+
+        private void DrawFormula(Graphics g)
+        {
+            Font formulaFont = new Font("Arial", 11, FontStyle.Bold);
+            string formula = "y = (2.5x³) / (e^(2x) + 2)";
+            string range = $"0 ≤ x ≤ 0.5, Δx = 0.1";
+            
+            g.DrawString(formula, formulaFont, Brushes.DarkBlue, 10, 10);
+            g.DrawString(range, new Font("Arial", 9), Brushes.DarkGreen, 10, 30);
+        }
+
+        private void GraphForm_Resize(object sender, EventArgs e)
+        {
+            // Перемальовуємо графік при зміні розміру вікна
+            this.Invalidate();
+        }
+
         [STAThread]
-        static void Main()
+        public static void Main()
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
